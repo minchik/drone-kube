@@ -7,14 +7,14 @@ import (
 	"log"
 	"time"
 
+	"k8s.io/api/apps/v1"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api"
-	"k8s.io/client-go/pkg/api/v1"
-	"k8s.io/client-go/pkg/apis/extensions/v1beta1"
-	"k8s.io/client-go/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	utilyaml "k8s.io/kubernetes/pkg/util/yaml"
+	"k8s.io/client-go/tools/clientcmd/api"
+	"sigs.k8s.io/yaml"
 )
 
 type (
@@ -57,6 +57,9 @@ type (
 	}
 )
 
+var scheme = runtime.NewScheme()
+var codecs = serializer.NewCodecFactory(scheme)
+
 func (p Plugin) Exec() error {
 
 	if p.Config.Server == "" {
@@ -87,38 +90,38 @@ func (p Plugin) Exec() error {
 		return err
 	}
 	// convert txt back to []byte and convert to json
-	json, err := utilyaml.ToJSON([]byte(txt))
+	json, err := yaml.YAMLToJSON([]byte(txt))
 	if err != nil {
 		return err
 	}
 
-	var dep v1beta1.Deployment
+	var dep v1.Deployment
 
-	e := runtime.DecodeInto(api.Codecs.UniversalDecoder(), json, &dep)
+	e := runtime.DecodeInto(codecs.UniversalDecoder(), json, &dep)
 	if e != nil {
 		log.Fatal("Error decoding yaml file to json", e)
 	}
 	// check and see if there is a deployment already.  If there is, update it.
-	oldDep, err := findDeployment(dep.ObjectMeta.Name, dep.ObjectMeta.Namespace, clientset)
+	oldDep, err := findDeployment(dep.Name, dep.ObjectMeta.Namespace, clientset)
 	if err != nil {
 		return err
 	}
 	if oldDep.ObjectMeta.Name == dep.ObjectMeta.Name {
 		// update the existing deployment, ignore the deployment that it comes back with
-		_, err = clientset.ExtensionsV1beta1().Deployments(p.Config.Namespace).Update(&dep)
+		_, err = clientset.AppsV1().Deployments(p.Config.Namespace).Update(&dep)
 		return err
 	}
 	// create the new deployment since this never existed.
-	_, err = clientset.ExtensionsV1beta1().Deployments(p.Config.Namespace).Create(&dep)
+	_, err = clientset.AppsV1().Deployments(p.Config.Namespace).Create(&dep)
 
 	return err
 }
 
-func findDeployment(depName string, namespace string, c *kubernetes.Clientset) (v1beta1.Deployment, error) {
+func findDeployment(depName string, namespace string, c *kubernetes.Clientset) (v1.Deployment, error) {
 	if namespace == "" {
 		namespace = "default"
 	}
-	var d v1beta1.Deployment
+	var d v1.Deployment
 	deployments, err := listDeployments(c, namespace)
 	if err != nil {
 		return d, err
@@ -132,10 +135,10 @@ func findDeployment(depName string, namespace string, c *kubernetes.Clientset) (
 }
 
 // List the deployments
-func listDeployments(clientset *kubernetes.Clientset, namespace string) ([]v1beta1.Deployment, error) {
+func listDeployments(clientset *kubernetes.Clientset, namespace string) ([]v1.Deployment, error) {
 	// docs on this:
 	// https://github.com/kubernetes/client-go/blob/master/pkg/apis/extensions/types.go
-	deployments, err := clientset.ExtensionsV1beta1().Deployments(namespace).List(v1.ListOptions{})
+	deployments, err := clientset.AppsV1().Deployments(namespace).List(metaV1.ListOptions{})
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -157,16 +160,16 @@ func openAndSub(templateFile string, p Plugin) (string, error) {
 func (p Plugin) createKubeClient() (*kubernetes.Clientset, error) {
 
 	ca, err := base64.StdEncoding.DecodeString(p.Config.Ca)
-	config := clientcmdapi.NewConfig()
-	config.Clusters["drone"] = &clientcmdapi.Cluster{
+	config := api.NewConfig()
+	config.Clusters["drone"] = &api.Cluster{
 		Server: p.Config.Server,
 		CertificateAuthorityData: ca,
 	}
-	config.AuthInfos["drone"] = &clientcmdapi.AuthInfo{
+	config.AuthInfos["drone"] = &api.AuthInfo{
 		Token: p.Config.Token,
 	}
 
-	config.Contexts["drone"] = &clientcmdapi.Context{
+	config.Contexts["drone"] = &api.Context{
 		Cluster:  "drone",
 		AuthInfo: "drone",
 	}
@@ -185,7 +188,8 @@ func (p Plugin) createKubeClient() (*kubernetes.Clientset, error) {
 // Just an example from the client specification.  Code not really used.
 func watchPodCounts(clientset *kubernetes.Clientset) {
 	for {
-		pods, err := clientset.Core().Pods("").List(v1.ListOptions{})
+
+		pods, err := clientset.CoreV1().Pods("").List(metaV1.ListOptions{})
 		if err != nil {
 			log.Fatal(err.Error())
 		}
