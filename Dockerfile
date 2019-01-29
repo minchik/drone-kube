@@ -1,9 +1,17 @@
-FROM alpine:3.4
+FROM alpine:3.4 as ca-source
 
-RUN apk update && \
-  apk add \
-    ca-certificates && \
-  rm -rf /var/cache/apk/*
+RUN apk update && apk add ca-certificates
 
-ADD drone-kube /bin/
+
+FROM golang:1.11-alpine as build-backend
+
+WORKDIR /go/src/github.com/minchik/drone-kube
+COPY . ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s"
+
+
+FROM scratch
+
+COPY --from=ca-source /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build-backend /go/src/github.com/minchik/drone-kube/drone-kube /bin/
 ENTRYPOINT ["/bin/drone-kube"]
