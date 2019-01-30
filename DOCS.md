@@ -14,16 +14,16 @@ Basic example:
 ```yaml
 pipeline:
   deploy:
-  	 image: vallard/drone-kube
-     template: deployment.yaml
+    image: vallard/drone-kube
+    template: deployment.yaml
 ```
 
-Example configuration with non-default namespace:
+Example configuration with overwritten namespace:
 
 ```diff
 pipeline:
   kube:
-  	image: vallard/drone-kube
+    image: vallard/drone-kube
     template: deployment.yaml
 +   namespace: mynamespace
 ```
@@ -33,7 +33,7 @@ You can also specify the server in the configuration as well.  It could alternat
 ```diff
 pipeline:
   kubernetes:
-  	image: vallard/drone-kube
+    image: vallard/drone-kube
     template: deployment.yaml
 +   namespace: mynamespace
 +   server: https://10.93.234.28:6433
