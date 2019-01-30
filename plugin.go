@@ -2,19 +2,18 @@ package main
 
 import (
 	"encoding/base64"
-	"fmt"
 	"io/ioutil"
-	"log"
-	"time"
 
-	"k8s.io/api/apps/v1"
+	"github.com/pkg/errors"
+
+	appsV1 "k8s.io/api/apps/v1"
+	coreV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"sigs.k8s.io/yaml"
 )
 
 type (
@@ -63,86 +62,76 @@ var codecs = serializer.NewCodecFactory(scheme)
 func (p Plugin) Exec() error {
 
 	if p.Config.Server == "" {
-		log.Fatal("KUBE_SERVER is not defined")
+		return errors.New("KUBE_SERVER is not defined")
 	}
 	if p.Config.Token == "" {
-		log.Fatal("KUBE_TOKEN is not defined")
+		return errors.New("KUBE_TOKEN is not defined")
 	}
 	if p.Config.Ca == "" {
-		log.Fatal("KUBE_CA is not defined")
-	}
-	if p.Config.Namespace == "" {
-		p.Config.Namespace = "default"
+		return errors.New("KUBE_CA is not defined")
 	}
 	if p.Config.Template == "" {
-		log.Fatal("KUBE_TEMPLATE, or template must be defined")
+		return errors.New("KUBE_TEMPLATE, or template must be defined")
 	}
 
 	// connect to Kubernetes
 	clientset, err := p.createKubeClient()
 	if err != nil {
-		log.Fatal(err.Error())
+		return errors.Wrap(err, "can't create kubernetes client")
 	}
 
 	// parse the template file and do substitutions
 	txt, err := openAndSub(p.Config.Template, p)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "can't read provided deployment template")
 	}
-	// convert txt back to []byte and convert to json
-	json, err := yaml.YAMLToJSON([]byte(txt))
+
+	var dep appsV1.Deployment
+
+	err = runtime.DecodeInto(codecs.UniversalDecoder(), []byte(txt), &dep)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "can't decode provided deployment template")
 	}
 
-	var dep v1.Deployment
-
-	e := runtime.DecodeInto(codecs.UniversalDecoder(), json, &dep)
-	if e != nil {
-		log.Fatal("Error decoding yaml file to json", e)
+	//override deployment namespace
+	if p.Config.Namespace != "" {
+		dep.Namespace = p.Config.Namespace
 	}
+
+	//set default namespace if not set
+	if dep.Namespace == "" {
+		dep.Namespace = coreV1.NamespaceDefault
+	}
+
 	// check and see if there is a deployment already.  If there is, update it.
-	oldDep, err := findDeployment(dep.Name, dep.ObjectMeta.Namespace, clientset)
+	oldDep, err := findDeployment(dep.Name, dep.Namespace, clientset)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "can't read deployments")
 	}
-	if oldDep.ObjectMeta.Name == dep.ObjectMeta.Name {
+	if oldDep.Name == dep.Name {
 		// update the existing deployment, ignore the deployment that it comes back with
-		_, err = clientset.AppsV1().Deployments(p.Config.Namespace).Update(&dep)
-		return err
+		_, err = clientset.AppsV1().Deployments(dep.Namespace).Update(&dep)
+		return errors.Wrap(err, "can't update provided deployment")
 	}
 	// create the new deployment since this never existed.
-	_, err = clientset.AppsV1().Deployments(p.Config.Namespace).Create(&dep)
+	_, err = clientset.AppsV1().Deployments(dep.Namespace).Create(&dep)
 
-	return err
+	return errors.Wrap(err, "can't create provided deployment")
 }
 
-func findDeployment(depName string, namespace string, c *kubernetes.Clientset) (v1.Deployment, error) {
-	if namespace == "" {
-		namespace = "default"
-	}
-	var d v1.Deployment
-	deployments, err := listDeployments(c, namespace)
+func findDeployment(depName string, namespace string, c *kubernetes.Clientset) (appsV1.Deployment, error) {
+	var d appsV1.Deployment
+	deployments, err := c.AppsV1().Deployments(namespace).List(metaV1.ListOptions{})
 	if err != nil {
 		return d, err
 	}
-	for _, thisDep := range deployments {
-		if thisDep.ObjectMeta.Name == depName {
-			return thisDep, err
+
+	for _, thisDep := range deployments.Items {
+		if thisDep.Name == depName {
+			return thisDep, nil
 		}
 	}
-	return d, err
-}
-
-// List the deployments
-func listDeployments(clientset *kubernetes.Clientset, namespace string) ([]v1.Deployment, error) {
-	// docs on this:
-	// https://github.com/kubernetes/client-go/blob/master/pkg/apis/extensions/types.go
-	deployments, err := clientset.AppsV1().Deployments(namespace).List(metaV1.ListOptions{})
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	return deployments.Items, err
+	return d, nil
 }
 
 // open up the template and then sub variables in. Handlebar stuff.
@@ -151,15 +140,17 @@ func openAndSub(templateFile string, p Plugin) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	//potty humor!  Render trim toilet paper!  Ha ha, so funny.
 	return RenderTrim(string(t), p)
 }
 
 // create the connection to kubernetes based on parameters passed in.
-// the kubernetes/client-go project is really hard to understand.
 func (p Plugin) createKubeClient() (*kubernetes.Clientset, error) {
 
 	ca, err := base64.StdEncoding.DecodeString(p.Config.Ca)
+	if err != nil {
+		return nil, err
+	}
+
 	config := api.NewConfig()
 	config.Clusters["drone"] = &api.Cluster{
 		Server: p.Config.Server,
@@ -173,27 +164,13 @@ func (p Plugin) createKubeClient() (*kubernetes.Clientset, error) {
 		Cluster:  "drone",
 		AuthInfo: "drone",
 	}
-	//config.Clusters["drone"].CertificateAuthorityData = ca
 	config.CurrentContext = "drone"
 
 	clientBuilder := clientcmd.NewNonInteractiveClientConfig(*config, "drone", &clientcmd.ConfigOverrides{}, nil)
 	actualCfg, err := clientBuilder.ClientConfig()
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	return kubernetes.NewForConfig(actualCfg)
-}
-
-// Just an example from the client specification.  Code not really used.
-func watchPodCounts(clientset *kubernetes.Clientset) {
-	for {
-
-		pods, err := clientset.CoreV1().Pods("").List(metaV1.ListOptions{})
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
-		time.Sleep(10 * time.Second)
-	}
 }

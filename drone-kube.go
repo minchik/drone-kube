@@ -34,7 +34,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:   "namespace",
-			Usage:  "namespace to use: 'default' is the default :-)",
+			Usage:  "namespace to use, it overwrites namespace parameter in template",
 			EnvVar: "KUBE_NAMESPACE,PLUGIN_NAMESPACE",
 		},
 		cli.StringFlag{

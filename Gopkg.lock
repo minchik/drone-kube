@@ -134,6 +134,14 @@
   version = "v2.0.1"
 
 [[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
+  version = "v0.8.1"
+
+[[projects]]
   digest = "1:ce8848a6fa8a2014d5fd57b5caa9c3c8000e29fb4cfe1b5e3c3d340ce766d56e"
   name = "github.com/spf13/pflag"
   packages = ["."]
@@ -400,6 +408,7 @@
   input-imports = [
     "github.com/aymerick/raymond",
     "github.com/joho/godotenv",
+    "github.com/pkg/errors",
     "github.com/urfave/cli",
     "k8s.io/api/apps/v1",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
