@@ -1,19 +1,24 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pipeline-registry
+  name: echo
 spec:
-  replicas: 3
+  selector:
+    matchLabels:
+      app: echo
+  replicas: 5
   template:
     metadata:
       labels:
-        app: pipeline-registry
+        app: echo
     spec:
       containers:
-      - name: pipeline-registry
-        image: vallard/pipeline-registry:{{ build.number }}
-        env:
-        - name: PIPELINE_REGISTRY
-          value: registry.cluster.local
-        ports:
-        - containerPort: 3000
+        - name: echo
+          image: hashicorp/http-echo
+          args:
+            - "-text=echo"
+          ports:
+            - containerPort: 5678
+          env:
+            - name: BUILD_NUMBER
+              value: "{{ build.number }}"
