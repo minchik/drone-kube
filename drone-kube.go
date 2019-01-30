@@ -9,13 +9,14 @@ import (
 	"github.com/urfave/cli"
 )
 
-var build = "0" // build number set at compile time
+var revision = ""
 
 func main() {
+	fmt.Printf("minchik/drone-kube %s\n", revision)
+
 	app := cli.NewApp()
 	app.Name = "drone-kube"
 	app.Action = run
-	app.Version = fmt.Sprintf("1.0.%s", build)
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:   "token",
